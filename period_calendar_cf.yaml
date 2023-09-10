@@ -1,0 +1,335 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create period calendar app
+
+Resources:
+  
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-dynamodb-table.html
+  # Reference: Create dynamodb table
+  UserDataTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      TableName: PeriodCalenderUserData
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-sns-topic.html
+  # Reference: create SNS topic 
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: 'PeriodCalendar'
+      TopicName: PeriodCalendarTopic
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-lambda-function.html
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-lambda-function-code.html
+  # Reference: create lambda function
+  RegistrationFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "register.zip"
+      FunctionName: registerlambda
+      Environment:
+        Variables:
+          "PeriodCalendarTopic": !Ref SNSTopic
+      Handler: register.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60
+
+  LoginFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "login.zip"
+      FunctionName: loginlambda
+      Handler: login.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60
+
+  SendMailFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "NextPeriodEmail.zip"
+      FunctionName: sendmaillambda
+      Handler: NextPeriodEmail.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60
+
+  FirstTimeUserFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "EventForPeriodFirstTimeUser.zip"
+      FunctionName: firsttimeuserlambda
+      Environment:
+        Variables:
+          "SendMailLambda": !GetAtt SendMailFunction.Arn
+      Handler: EventForPeriodFirstTimeUser.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60    
+
+  RegularUserFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "EventForRegularUser.zip"
+      FunctionName: regularuserlambda
+      Environment:
+        Variables:
+          "SendMailLambda": !GetAtt SendMailFunction.Arn
+      Handler: EventForRegularUser.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60  
+
+  GetUserDataFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "GetUserData.zip"
+      FunctionName: getuserdatalambda
+      Handler: GetUserData.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::115789338221:role/LabRole
+      Timeout: 60
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigatewayv2-api.html
+  # https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-cors.html
+  # Reference: Create HTTP API gateway
+  PeriodCalendarHttpApi:
+    Type: "AWS::ApiGatewayV2::Api"
+    Properties:
+      Name: "PeriodCalendar"
+      ProtocolType: "HTTP"
+      CorsConfiguration:
+        AllowMethods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+        AllowOrigins:
+          - "*"
+        AllowHeaders:
+          - "*"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigatewayv2-stage.html
+  APIGatewayStage:
+    Type: "AWS::ApiGatewayV2::Stage"
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-lambda-permission.html
+  # Reference: Grant permission to api gateway to invoke function
+  LambdaExecutionPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref RegistrationFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  LambdaExecutionPermissionLogin:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref LoginFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  LambdaExecutionPermissionFirstTimeUser:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref FirstTimeUserFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  LambdaExecutionPermissionRegularUser:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref RegularUserFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  LambdaExecutionPermissionSendMail:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref SendMailFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  LambdaExecutionPermissionGetUserData:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref GetUserDataFunction
+      Action: "lambda:InvokeFunction"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${PeriodCalendarHttpApi}/*/*"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigatewayv2-integration.html
+  # Reference: create integration for api with lambda function
+  RegisterFunctionIntegration:
+    Type: "AWS::ApiGatewayV2::Integration"
+    DependsOn:
+      - RegistrationFunction
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RegistrationFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  LoginFunctionIntegration:
+    Type: "AWS::ApiGatewayV2::Integration"
+    DependsOn:
+      - LoginFunction
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LoginFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  FirstTimeUserFunctionIntegration:
+    Type: "AWS::ApiGatewayV2::Integration"
+    DependsOn:
+      - FirstTimeUserFunction
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FirstTimeUserFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  RegularUserFunctionIntegration:
+    Type: "AWS::ApiGatewayV2::Integration"
+    DependsOn:
+      - RegularUserFunction
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${RegularUserFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  GetUserDataFunctionIntegration:
+    Type: "AWS::ApiGatewayV2::Integration"
+    DependsOn:
+      - GetUserDataFunction
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      IntegrationType: "AWS_PROXY"
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetUserDataFunction.Arn}/invocations"
+      PayloadFormatVersion: "2.0"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-apigatewayv2-route.html
+  # Reference: Create http api route for the created integation
+  RegisterLambdaRoute:
+    Type: "AWS::ApiGatewayV2::Route"
+    DependsOn:
+      - RegisterFunctionIntegration
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      RouteKey: "POST /register"
+      Target: !Sub "integrations/${RegisterFunctionIntegration}"
+
+  LoginLambdaRoute:
+    Type: "AWS::ApiGatewayV2::Route"
+    DependsOn:
+      - LoginFunctionIntegration
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      RouteKey: "POST /login"
+      Target: !Sub "integrations/${LoginFunctionIntegration}"
+
+  FirstTimeUserLambdaRoute:
+    Type: "AWS::ApiGatewayV2::Route"
+    DependsOn:
+      - FirstTimeUserFunctionIntegration
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      RouteKey: "POST /period_cycle"
+      Target: !Sub "integrations/${FirstTimeUserFunctionIntegration}"
+
+  RegularUserLambdaRoute:
+    Type: "AWS::ApiGatewayV2::Route"
+    DependsOn:
+      - RegularUserFunctionIntegration
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      RouteKey: "POST /period_date"
+      Target: !Sub "integrations/${RegularUserFunctionIntegration}"
+
+  GetUserDataLambdaRoute:
+    Type: "AWS::ApiGatewayV2::Route"
+    DependsOn:
+      - GetUserDataFunctionIntegration
+    Properties:
+      ApiId: !Ref PeriodCalendarHttpApi
+      RouteKey: "POST /getdata"
+      Target: !Sub "integrations/${GetUserDataFunctionIntegration}"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticbeanstalk-application.html
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/quickref-elasticbeanstalk.html
+  # Reference: create elastic bean stalk application
+  FrontendApplication:
+    Type: "AWS::ElasticBeanstalk::Application"
+    Properties:
+      ApplicationName: "PeriodCalendarHttpApi"
+      Description: "Application"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticbeanstalk-applicationversion.html
+  ApplicationVersion:
+    Type: "AWS::ElasticBeanstalk::ApplicationVersion"
+    Properties:
+      ApplicationName: !Ref FrontendApplication
+      Description: "Application Version"
+      SourceBundle:
+        S3Bucket: "cloud-term-b1"
+        S3Key: "period_calendar_frontend.zip"
+
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-elasticbeanstalk-environment.html
+  # https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/environments-create-api.html
+  FrontendEnvironment:
+    Type: "AWS::ElasticBeanstalk::Environment"
+    Properties:
+      ApplicationName: !Ref FrontendApplication
+      Description: "Environment"
+      EnvironmentName: "PeriodCalendarHttpApi"
+      SolutionStackName: "64bit Amazon Linux 2 v5.8.4 running Node.js 18"
+      VersionLabel: !Ref ApplicationVersion
+      OperationsRole: "arn:aws:iam::115789338221:role/LabRole"
+      Tier:
+        Name: "WebServer"
+        Type: "Standard"
+      OptionSettings:
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: EnvironmentType
+          Value: "SingleInstance"
+        - Namespace: "aws:elasticbeanstalk:environment"
+          OptionName: ServiceRole
+          Value: arn:aws:iam::115789338221:role/LabRole
+        - Namespace: "aws:autoscaling:launchconfiguration"
+          OptionName: "IamInstanceProfile"
+          Value: "LabInstanceProfile"
+        - Namespace: "aws:elasticbeanstalk:application:environment"
+          OptionName: "REACT_APP_PERIOD_CALENDAR"
+          Value: !Sub "https://${PeriodCalendarHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+
+ 
